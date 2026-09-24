@@ -1,0 +1,14 @@
+import express from 'express';
+import { enrollCourse, getMyCourses, checkEnrollment, getAllEnrollments, deleteEnrollment, saveProgress, approveLegacyEnrollment } from '../controllers/enrollmentController.js';
+import { requireUser, requireAdmin } from '../lib/security.js';
+import { rateLimit } from '../middlewares/rateLimit.js';
+const router = express.Router();
+router.use(requireUser);
+router.post('/', rateLimit('redemption', 10), enrollCourse);
+router.get('/my', getMyCourses);
+router.get('/all', requireAdmin, getAllEnrollments);
+router.get('/check/:courseId', checkEnrollment);
+router.put('/progress/:courseId', saveProgress);
+router.post('/:id/approve', requireAdmin, approveLegacyEnrollment);
+router.delete('/:id', requireAdmin, deleteEnrollment);
+export default router;

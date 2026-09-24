@@ -1,0 +1,17 @@
+import express from 'express';
+import { createUser, loginUser, deleteUser, updateUser, getUser, googleLogin, sendOTP, validateOTPAndUpdatePassword, getAllUsers, updateUserStatus, logout } from '../controllers/userController.js';
+import { requireUser, requireAdmin } from '../lib/security.js';
+import { rateLimit } from '../middlewares/rateLimit.js';
+const router = express.Router();
+router.post('/', rateLimit('register', 10), createUser);
+router.post('/login', rateLimit('login', 20), loginUser);
+router.post('/google-login', rateLimit('login', 20), googleLogin);
+router.get('/send-otp/:email', rateLimit('reset-send', 5), sendOTP);
+router.post('/validate-otp', rateLimit('reset-check', 10), validateOTPAndUpdatePassword);
+router.post('/logout', logout);
+router.get('/', requireUser, getUser);
+router.get('/all', requireAdmin, getAllUsers);
+router.put('/toggle-block/:email', requireAdmin, updateUserStatus);
+router.delete('/:email', requireAdmin, deleteUser);
+router.put('/:email', requireUser, updateUser);
+export default router;

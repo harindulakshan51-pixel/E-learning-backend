@@ -1,0 +1,12 @@
+import express from 'express';
+import { createCourseVideo, getAllCourseVideos, getVideosByCourseId, getVideoById, updateCourseVideo, deleteCourseVideo } from '../controllers/coursevideoController.js';
+import { requireUser, requireAdmin } from '../lib/security.js';
+const router = express.Router();
+router.use(requireUser);
+router.post('/', requireAdmin, createCourseVideo);
+router.get('/all', requireAdmin, getAllCourseVideos);
+router.put('/:videoId', requireAdmin, updateCourseVideo);
+router.delete('/:videoId', requireAdmin, deleteCourseVideo);
+router.get('/course/:courseId', getVideosByCourseId);
+router.get('/:videoId', getVideoById);
+export default router;

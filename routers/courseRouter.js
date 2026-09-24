@@ -1,0 +1,11 @@
+import express from 'express';
+import { createCourse, getAllCourses, getCourseById, updateCourse, deleteCourse, searchCourse } from '../controllers/courseController.js';
+import { requireAdmin } from '../lib/security.js';
+const router = express.Router();
+router.post('/', requireAdmin, createCourse);
+router.get('/search/:query', searchCourse);
+router.put('/:courseId', requireAdmin, updateCourse);
+router.delete('/:courseId', requireAdmin, deleteCourse);
+router.get('/', getAllCourses);
+router.get('/:courseId', getCourseById);
+export default router;
