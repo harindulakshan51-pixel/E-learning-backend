@@ -2,9 +2,10 @@ import express from 'express';
 import axios from 'axios';
 import { randomUUID } from 'node:crypto';
 import { requireAdmin, fail } from '../lib/security.js';
+import { storageBase, imageBucket, publicImage } from '../lib/storage.js';
 const router = express.Router();
 router.post('/', requireAdmin, express.raw({ type: ['image/png', 'image/jpeg', 'image/webp'], limit: '5mb' }), async (req, res) => {
-  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) throw fail(503, 'Image storage is not configured');
+  if (!process.env.SUPABASE_URL?.trim() || !process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()) throw fail(503, 'Image uploads are not configured. The administrator must add the server-side storage key and restart the backend.');
   const data = req.body;
   if (!Buffer.isBuffer(data)) throw fail(400, 'Use a PNG, JPEG or WebP image');
   const mime = req.get('Content-Type')?.split(';')[0];
@@ -12,8 +13,8 @@ router.post('/', requireAdmin, express.raw({ type: ['image/png', 'image/jpeg', '
   if (!valid) throw fail(400, 'Image content does not match its type');
   const extension = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' }[mime];
   const name = randomUUID() + '.' + extension;
-  const base = process.env.SUPABASE_URL.replace(/\/$/, '');
-  await axios.post(base + '/storage/v1/object/Images/' + name, data, { headers: { Authorization: 'Bearer ' + process.env.SUPABASE_SERVICE_ROLE_KEY, apikey: process.env.SUPABASE_SERVICE_ROLE_KEY, 'Content-Type': mime }, timeout: 30000 });
-  res.status(201).json({ url: base + '/storage/v1/object/public/Images/' + name });
+  const base = storageBase();
+  await axios.post(base + '/storage/v1/object/' + encodeURIComponent(imageBucket()) + '/' + name, data, { headers: { Authorization: 'Bearer ' + process.env.SUPABASE_SERVICE_ROLE_KEY, apikey: process.env.SUPABASE_SERVICE_ROLE_KEY, 'Content-Type': mime }, timeout: 30000 });
+  res.status(201).json({ url: publicImage(name) });
 });
 export default router;

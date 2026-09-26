@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { defaultCourseImage } from '../lib/storage.js';
 
 const courseSchema = new mongoose.Schema(
 
@@ -32,7 +33,7 @@ const courseSchema = new mongoose.Schema(
         thumbnail : {
             type : String,
             required : true,
-            default : "/default-course.png"
+            default : defaultCourseImage
         },
 
         instructor : {

@@ -89,6 +89,7 @@ export async function saveProgress(req, res) {
   const update = { $set: { lastVideoId: videoId, position, lastActivity: new Date() } };
   if (req.body.completed === true) update.$addToSet = { completedVideos: videoId };
   // This status predicate also prevents progress updates racing enrollment revocation.
-  await Enrollment.updateOne({ userId: req.user.email, courseId, status: 'active' }, update);
+  const result = await Enrollment.updateOne({ userId: req.user.email, courseId, status: 'active' }, update);
+  if (!result.matchedCount) throw fail(403, 'An active enrollment is required to save progress');
   res.json({ message: 'Progress saved' });
 }

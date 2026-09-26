@@ -10,8 +10,7 @@ import Course from '../models/course.js';
 import Lesson from '../models/coursevideo.js';
 import Enrollment from '../models/enrollment.js';
 import AccessCode from '../models/accessCode.js';
-import { newCode, hashCode } from '../lib/security.js';
-import { playbackSession } from '../lib/drm.js';
+import { hashCode } from '../lib/security.js';
 
 let repl, server, base, admin, student, other;
 const origin = 'http://localhost:5173';
@@ -49,7 +48,7 @@ beforeEach(async () => {
     { email: 'other@example.test', firstName: 'Other', lastName: 'Student', password: hash },
   ]);
   for (const courseId of ['COURSE001', 'COURSE002']) await Course.create({ courseId, title: courseId, description: 'Course', price: 100, labelledPrice: '100', instructor: 'Teacher', duration: '1h' });
-  await Lesson.create({ videoId: 'LESSON1', courseId: 'COURSE001', title: 'Legacy lesson', videoUrl: 'https://example.test/secret.mp4', duration: '10:00', order: 1, isPreview: true });
+  await Lesson.create({ videoId: 'LESSON1', courseId: 'COURSE001', title: 'Legacy lesson', youtubeVideoId: 'abcdefghijk', duration: '10:00', order: 1, isPreview: true });
   admin = (await login('admin@example.test')).cookie;
   student = (await login('student@example.test')).cookie;
   other = (await login('other@example.test')).cookie;
@@ -69,7 +68,7 @@ test('existing passwords work; sessions are HttpOnly and expiring; invalid crede
   assert.equal((await request('/users', { token: jwt.sign({ email: 'admin@example.test', isAdmin: true }, process.env.JWT_SECRET_KEY) })).status, 401);
 });
 test('every lesson route is locked, including preview lessons; no raw legacy URL leaks', async () => {
-  for (const path of ['/course-videos/course/COURSE001', '/course-videos/LESSON1', '/course-videos/LESSON1/playback']) {
+  for (const path of ['/course-videos/course/COURSE001', '/course-videos/LESSON1']) {
     assert.equal((await request(path)).status, 401);
     assert.equal((await request(path, { cookie: student })).status, 403);
   }
@@ -79,7 +78,7 @@ test('every lesson route is locked, including preview lessons; no raw legacy URL
   const lessons = await request('/course-videos/course/COURSE001', { cookie: admin });
   assert.ok(!JSON.stringify(lessons.body).includes('secret.mp4'));
 });
-test('course-scoped single-use code unlocks only the owner My Courses and lesson metadata; DRM migration stays locked', async () => {
+test('course-scoped single-use code unlocks only the owner My Courses and lesson metadata', async () => {
   assert.deepEqual((await request('/enrollments/my', { cookie: student })).body, []);
   const issued = await code();
   assert.equal((await redeem(issued.code, student, 'COURSE002')).status, 400);
@@ -88,7 +87,6 @@ test('course-scoped single-use code unlocks only the owner My Courses and lesson
   assert.equal(mine.body.length, 1); assert.equal(mine.body[0].courseId, 'COURSE001');
   assert.deepEqual((await request('/enrollments/my', { cookie: other })).body, []);
   assert.equal((await request('/course-videos/LESSON1', { cookie: student })).status, 200);
-  assert.equal((await request('/course-videos/LESSON1/playback', { cookie: student })).status, 423);
   assert.equal((await redeem(issued.code, other)).status, 400);
   assert.equal((await redeem(issued.code)).status, 409);
   assert.equal(await Enrollment.countDocuments(), 1);
@@ -118,7 +116,7 @@ test('code revocation withdraws enrollment, My Courses visibility, progress and 
   assert.equal((await request('/enrollments/check/COURSE001', { cookie: student })).body.enrollment.position, 42);
   await request('/access-codes/' + issued.id + '/revoke', { method: 'POST', cookie: admin });
   assert.deepEqual((await request('/enrollments/my', { cookie: student })).body, []);
-  assert.equal((await request('/course-videos/LESSON1/playback', { cookie: student })).status, 403);
+  assert.equal((await request('/course-videos/LESSON1', { cookie: student })).status, 403);
   assert.equal((await request('/enrollments/progress/COURSE001', { method: 'PUT', cookie: student, body: { videoId: 'LESSON1', position: 50 } })).status, 403);
   const replacement = await code(); assert.equal((await redeem(replacement.code)).status, 200);
   assert.equal(await Enrollment.countDocuments(), 1);
@@ -159,39 +157,6 @@ test('progress cannot reference another course; course IDs stay immutable and ar
   assert.ok(await Course.exists({ courseId: 'COURSE001' }));
   assert.equal((await request('/course-videos/LESSON1', { cookie: student })).status, 403);
 });
-test('YouTube is disabled and DRM sessions fail closed when provider configuration is absent', async () => {
-  assert.equal((await request('/course-videos', { method: 'POST', cookie: admin, body: { videoId: 'YT', courseId: 'COURSE001', videoUrl: 'https://youtu.be/abcdefghijk' } })).status, 400);
-  await assert.rejects(playbackSession({ provider: 'mux-drm', muxPlaybackId: 'abc' }), { status: 503 });
-  const values = Array.from({ length: 100 }, newCode);
-  assert.equal(new Set(values).size, 100);
-  assert.ok(values.every(v => /^CRS-(?:[A-F0-9]{4}-){7}[A-F0-9]{4}$/.test(v)));
-});
-
-
-test('DRM tokens are signed, scoped, short lived and nonpersistent; non-DRM assets fail verification', async () => {
-  const { generateKeyPairSync } = await import('node:crypto');
-  const { default: axios } = await import('axios');
-  const { verifyDrmPlaybackId } = await import('../lib/drm.js');
-  const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
-  const original = axios.get;
-  const keys = ['MUX_TOKEN_ID','MUX_TOKEN_SECRET','MUX_SIGNING_KEY_ID','MUX_SIGNING_PRIVATE_KEY_BASE64','MUX_PLAYBACK_RESTRICTION_ID'];
-  const previous = Object.fromEntries(keys.map(k => [k, process.env[k]]));
-  Object.assign(process.env, { MUX_TOKEN_ID: 'test', MUX_TOKEN_SECRET: 'test', MUX_SIGNING_KEY_ID: 'key', MUX_SIGNING_PRIVATE_KEY_BASE64: Buffer.from(privateKey.export({ type: 'pkcs8', format: 'pem' })).toString('base64'), MUX_PLAYBACK_RESTRICTION_ID: 'restriction' });
-  try {
-    axios.get = async url => ({ data: { data: url.includes('/playback-ids/') ? { policy: 'drm', object: { type: 'asset', id: 'asset1' } } : { status: 'ready', duration: 600, playback_ids: [{ policy: 'drm' }], mp4_support: 'none' } } });
-    const playback = await playbackSession({ provider: 'mux-drm', muxPlaybackId: 'secureID' });
-    const license = jwt.verify(playback.tokens.drm, publicKey, { audience: 'd', subject: 'secureID', algorithms: ['RS256'] });
-    assert.equal(license.offline, false); assert.equal(license.exp - license.iat, 300); assert.equal(license.playback_restriction_id, 'restriction');
-    assert.throws(() => jwt.verify(playback.tokens.drm, publicKey, { audience: 'v' }));
-    axios.get = async () => ({ data: { data: { policy: 'public' } } });
-    await assert.rejects(verifyDrmPlaybackId('publicID'), { status: 400 });
-    axios.get = async url => ({ data: { data: url.includes('/playback-ids/') ? { policy: 'drm', object: { type: 'asset', id: 'asset1' } } : { status: 'ready', playback_ids: [{ policy: 'drm' }, { policy: 'public' }] } } });
-    await assert.rejects(verifyDrmPlaybackId('mixedID'), { status: 400 });
-  } finally {
-    axios.get = original;
-    for (const key of keys) if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key];
-  }
-});
 test('migration preserves users, paid enrollments and URLs; reviews unverified records; is repeatable', async () => {
   const { execFile } = await import('node:child_process');
   const { promisify } = await import('node:util');
@@ -209,7 +174,7 @@ test('migration preserves users, paid enrollments and URLs; reviews unverified r
   assert.equal((await Enrollment.findOne({ userId: row.userId })).status, 'active');
   assert.equal((await Enrollment.findOne({ userId: 'other@example.test' })).status, 'pending_review');
   assert.equal(await db.collection('enrollment_duplicate_archive').countDocuments(), 1);
-  assert.equal((await Lesson.findOne().select('+videoUrl')).videoUrl, 'https://example.test/secret.mp4');
+  assert.equal((await Lesson.findOne()).youtubeVideoId, 'abcdefghijk');
   assert.equal(JSON.stringify(await User.find().sort({ email: 1 }).lean()), usersBefore);
   await run(['--apply']);
   assert.equal(await Enrollment.countDocuments(), 2);
@@ -253,4 +218,46 @@ test('concurrent different codes for one student cannot consume both codes', asy
   assert.deepEqual(results.map(r => r.status).sort(), [200, 409]);
   assert.equal(await Enrollment.countDocuments(), 1);
   assert.equal(await AccessCode.countDocuments({ status: 'unused' }), 1);
+});
+
+test('lesson admin permissions, normalization and updates preserve identity and history', async () => {
+  const fields = { title: 'Updated', duration: '12:34', order: 2, youtubeVideoId: 'https://youtu.be/Abc_def-123' };
+  for (const method of ['PUT', 'DELETE']) assert.equal((await request('/course-videos/LESSON1', { method, cookie: student, body: fields })).status, 403);
+  assert.equal((await request('/course-videos', { method: 'POST', cookie: student, body: { ...fields, videoId: 'NEW', courseId: 'COURSE001' } })).status, 403);
+  assert.equal((await request('/course-videos/LESSON1', { method: 'PUT', cookie: admin, body: fields })).status, 200);
+  const lesson = await Lesson.findOne({ videoId: 'LESSON1' });
+  assert.equal(lesson.courseId, 'COURSE001'); assert.equal(lesson.youtubeVideoId, 'Abc_def-123'); assert.equal(lesson.order, 2); assert.equal(lesson.duration, '12:34');
+  assert.equal((await request('/course-videos/LESSON1', { method: 'PUT', cookie: admin, body: { ...fields, youtubeVideoId: '!!!!!!!!!!!' } })).status, 400);
+  assert.equal((await request('/course-videos/LESSON1', { method: 'PUT', cookie: admin, body: { ...fields, courseId: 'COURSE002' } })).status, 400);
+  for (const path of ['/courses', '/courses/COURSE001', '/courses/search/COURSE']) assert.ok(!JSON.stringify((await request(path)).body).includes('Abc_def-123'));
+});
+
+test('progress is scoped to session, validates positions and preserves completion', async () => {
+  await redeem((await code()).code);
+  for (const position of [-1, '50', 86401]) assert.equal((await request('/enrollments/progress/COURSE001', { method: 'PUT', cookie: student, body: { videoId: 'LESSON1', position } })).status, 400);
+  for (const completed of [true, false]) assert.equal((await request('/enrollments/progress/COURSE001', { method: 'PUT', cookie: student, body: { videoId: 'LESSON1', position: 52, completed, userId: 'other@example.test', isAdmin: true } })).status, 200);
+  const row = await Enrollment.findOne({ userId: 'student@example.test' });
+  assert.equal(row.position, 52); assert.deepEqual([...row.completedVideos], ['LESSON1']);
+  assert.equal(await Enrollment.countDocuments({ userId: 'other@example.test' }), 0);
+  await request('/enrollments/' + row._id, { method: 'DELETE', cookie: admin });
+  for (const path of ['/course-videos/LESSON1', '/course-videos/course/COURSE001']) assert.equal((await request(path, { cookie: student })).status, 403);
+  assert.equal((await request('/enrollments/progress/COURSE001', { method: 'PUT', cookie: student, body: { videoId: 'LESSON1', position: 60 } })).status, 403);
+});
+
+test('YouTube migration is repeatable and preserves legacy data and progress', async () => {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  await Lesson.collection.insertOne({ videoId: 'LEGACY', courseId: 'COURSE001', title: 'Old', duration: '1:00', order: 3, videoUrl: 'https://youtu.be/Abc_def-123' });
+  await Lesson.collection.insertOne({ videoId: 'UNMAPPED', courseId: 'COURSE001', title: 'Unmapped', duration: '1:00', order: 4, provider: 'legacy', videoUrl: 'https://example.test/private.mp4' });
+  await redeem((await code()).code);
+  await request('/enrollments/progress/COURSE001', { method: 'PUT', cookie: student, body: { videoId: 'LESSON1', position: 42, completed: true } });
+  const before = JSON.stringify(await Enrollment.find().lean());
+  const run = args => promisify(execFile)(process.execPath, ['migrations/002-youtube-lessons.js', ...args], { env: { ...process.env, MONGODB_URI: repl.getUri('scholarly_security_test') }, timeout: 30000 });
+  await run([]); assert.equal((await Lesson.findOne({ videoId: 'LEGACY' })).youtubeVideoId, undefined);
+  await run(['--apply']); await run(['--apply']);
+  const migrated = await Lesson.collection.findOne({ videoId: 'LEGACY' });
+  assert.equal(migrated.youtubeVideoId, 'Abc_def-123'); assert.equal(migrated.videoUrl, 'https://youtu.be/Abc_def-123'); assert.equal(migrated.order, 3);
+  assert.equal(await Lesson.countDocuments(), 3); assert.equal(JSON.stringify(await Enrollment.find().lean()), before);
+  const response = await request('/course-videos/course/COURSE001', { cookie: admin });
+  assert.ok(!JSON.stringify(response.body).includes('private.mp4'));
 });

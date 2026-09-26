@@ -1,7 +1,7 @@
 import CourseVideo from '../models/coursevideo.js';
 import Course from '../models/course.js';
 import { assertCourseAccess } from '../lib/access.js';
-import { fail, identifier, textField } from '../lib/security.js';
+import { fail, identifier, textField, youtubeId } from '../lib/security.js';
 
 function lessonData(body) {
   const data = {
@@ -12,10 +12,7 @@ function lessonData(body) {
   };
   if (!Number.isInteger(data.order) || data.order < 1) throw fail(400, 'Lesson order must be a positive integer');
   
-  if (!body.youtubeVideoId || typeof body.youtubeVideoId !== 'string' || body.youtubeVideoId.length !== 11) {
-    throw fail(400, 'Invalid YouTube Video ID. Please provide a valid YouTube URL or ID.');
-  }
-  data.youtubeVideoId = body.youtubeVideoId;
+  data.youtubeVideoId = youtubeId(body.youtubeVideoId);
 
   return data;
 }
@@ -36,17 +33,17 @@ export async function updateCourseVideo(req, res) {
 }
 
 export async function getAllCourseVideos(req, res) { 
-  res.json(await CourseVideo.find()); 
+  res.json(await CourseVideo.find().select('videoId courseId title youtubeVideoId duration durationSeconds order isPreview')); 
 }
 
 export async function getVideosByCourseId(req, res) {
   await assertCourseAccess(req.user, req.params.courseId);
-  const query = CourseVideo.find({ courseId: req.params.courseId }).sort({ order: 1 });
+  const query = CourseVideo.find({ courseId: req.params.courseId }).select('videoId courseId title youtubeVideoId duration durationSeconds order isPreview').sort({ order: 1 });
   res.json(await query);
 }
 
 export async function getVideoById(req, res) {
-  const video = await CourseVideo.findOne({ videoId: req.params.videoId });
+  const video = await CourseVideo.findOne({ videoId: req.params.videoId }).select('videoId courseId title youtubeVideoId duration durationSeconds order isPreview');
   if (!video) throw fail(404, 'Lesson not found');
   await assertCourseAccess(req.user, video.courseId);
   res.json(video);

@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { defaultProfileImage } from '../lib/storage.js';
 
 const userSchema = new mongoose.Schema(
 
@@ -40,7 +41,7 @@ const userSchema = new mongoose.Schema(
         image : {
             type : String,
             required : true,
-            default : "/defaultProfileIcon.png"
+            default : defaultProfileImage
         }
     }
 

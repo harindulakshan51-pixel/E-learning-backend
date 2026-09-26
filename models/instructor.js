@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { defaultProfileImage } from '../lib/storage.js';
 
 const instructorSchema = new mongoose.Schema({
   instructorId: {
@@ -27,7 +28,7 @@ const instructorSchema = new mongoose.Schema({
   image: {
     type: String,
     required: false,
-    default: "",
+    default: defaultProfileImage,
   },
   rating: {
     type: Number,
