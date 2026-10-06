@@ -261,3 +261,66 @@ test('YouTube migration is repeatable and preserves legacy data and progress', a
   const response = await request('/course-videos/course/COURSE001', { cookie: admin });
   assert.ok(!JSON.stringify(response.body).includes('private.mp4'));
 });
+
+
+test('only admins can reveal saved keys; lists and storage never expose plaintext', async () => {
+  const issued = await code();
+  const path = '/access-codes/' + issued.id + '/key';
+  assert.equal((await request(path)).status, 401);
+  assert.equal((await request(path, { cookie: student })).status, 403);
+  const revealed = await request(path, { cookie: admin });
+  assert.equal(revealed.status, 200);
+  assert.equal(revealed.body.code, issued.code);
+  assert.equal(revealed.headers.get('cache-control'), 'no-store');
+  const stored = await AccessCode.findById(issued.id).select('+encryptedCode').lean();
+  assert.ok(stored.encryptedCode);
+  assert.ok(!JSON.stringify(stored).includes(issued.code));
+  const list = await request('/access-codes', { cookie: admin });
+  assert.ok(!JSON.stringify(list.body).includes(issued.code));
+  assert.ok(!('encryptedCode' in list.body[0]));
+  assert.equal((await request('/access-codes/invalid/key', { cookie: admin })).status, 400);
+  assert.equal((await request('/access-codes/' + new mongoose.Types.ObjectId() + '/key', { cookie: admin })).status, 404);
+  await AccessCode.updateOne({ _id: issued.id }, { $unset: { encryptedCode: 1 } });
+  assert.equal((await request(path, { cookie: admin })).status, 409);
+});
+
+
+test('admins can delete only revoked codes without restoring enrollment access', async () => {
+  const issued = await code();
+  const path = '/access-codes/' + issued.id;
+  assert.equal((await request(path, { method: 'DELETE' })).status, 401);
+  assert.equal((await request(path, { method: 'DELETE', cookie: student })).status, 403);
+  assert.equal((await request(path, { method: 'DELETE', cookie: admin })).status, 409);
+  assert.equal((await redeem(issued.code)).status, 200);
+  assert.equal((await request(path, { method: 'DELETE', cookie: admin })).status, 409);
+  assert.equal((await request(path + '/revoke', { method: 'POST', cookie: admin })).status, 200);
+  assert.equal((await request(path, { method: 'DELETE', cookie: admin })).status, 200);
+  assert.equal(await AccessCode.findById(issued.id), null);
+  assert.ok(!(await request('/access-codes', { cookie: admin })).body.some(row => row._id === issued.id));
+  assert.equal((await Enrollment.findOne({ accessCodeId: issued.id })).status, 'revoked');
+  assert.equal((await request('/course-videos/LESSON1', { cookie: student })).status, 403);
+  assert.equal((await redeem(issued.code)).status, 400);
+  assert.equal((await request(path, { method: 'DELETE', cookie: admin })).status, 404);
+  assert.equal((await request('/access-codes/invalid', { method: 'DELETE', cookie: admin })).status, 400);
+});
+
+
+test('deleted courses stay hidden from admin lists while unavailable courses and history are preserved', async () => {
+  await Course.updateOne({ courseId: 'COURSE002' }, { $set: { isAvailable: false } });
+  const issued = await code();
+  await redeem(issued.code);
+  assert.equal((await request('/courses/COURSE001', { method: 'DELETE', cookie: admin })).status, 200);
+  for (let i = 0; i < 2; i++) {
+    const list = await request('/courses', { cookie: admin });
+    assert.deepEqual(list.body.map(row => row.courseId), ['COURSE002']);
+  }
+  assert.deepEqual((await request('/courses')).body, []);
+  assert.equal((await request('/courses/COURSE001', { cookie: admin })).status, 404);
+  assert.equal((await request('/courses/COURSE001', { method: 'PUT', cookie: admin, body: { isAvailable: true } })).status, 404);
+  const stored = await Course.findOne({ courseId: 'COURSE001' });
+  assert.ok(stored.archivedAt);
+  assert.equal(stored.isAvailable, false);
+  assert.ok(await Enrollment.exists({ courseId: 'COURSE001' }));
+  assert.ok(await Lesson.exists({ courseId: 'COURSE001' }));
+  assert.equal((await request('/courses/MISSING', { method: 'DELETE', cookie: admin })).status, 404);
+});

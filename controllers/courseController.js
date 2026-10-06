@@ -23,20 +23,21 @@ export async function createCourse(req, res) {
 }
 export async function updateCourse(req, res) {
   if ('courseId' in req.body) throw fail(400, 'Course ID cannot be changed because lessons and enrollments reference it');
-  if (!await Course.findOneAndUpdate({ courseId: req.params.courseId }, { $set: fields(req.body) }, { runValidators: true })) throw fail(404, 'Course not found');
+  if (!await Course.findOneAndUpdate({ courseId: req.params.courseId, archivedAt: null }, { $set: fields(req.body) }, { runValidators: true })) throw fail(404, 'Course not found');
   res.json({ message: 'Course updated successfully' });
 }
 export async function deleteCourse(req, res) {
-  await Course.updateOne({ courseId: req.params.courseId }, { $set: { isAvailable: false } });
+  const result = await Course.updateOne({ courseId: req.params.courseId, archivedAt: null }, { $set: { isAvailable: false, archivedAt: new Date() } });
+  if (!result.matchedCount) throw fail(404, 'Course not found');
   res.json({ message: 'Course archived; lessons and enrollment history preserved' });
 }
-export async function getAllCourses(req, res) { res.json(await Course.find(req.user?.isAdmin ? {} : { isAvailable: true })); }
+export async function getAllCourses(req, res) { res.json(await Course.find({ archivedAt: null, ...(req.user?.isAdmin ? {} : { isAvailable: true }) })); }
 export async function getCourseById(req, res) {
-  const course = await Course.findOne({ courseId: req.params.courseId, ...(req.user?.isAdmin ? {} : { isAvailable: true }) });
+  const course = await Course.findOne({ courseId: req.params.courseId, archivedAt: null, ...(req.user?.isAdmin ? {} : { isAvailable: true }) });
   if (!course) throw fail(404, 'Course not found');
   res.json(course);
 }
 export async function searchCourse(req, res) {
   const query = textField(req.params.query, 'Search', 100).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  res.json(await Course.find({ isAvailable: true, $or: [{ title: { $regex: query, $options: 'i' } }, { description: { $regex: query, $options: 'i' } }] }));
+  res.json(await Course.find({ isAvailable: true, archivedAt: null, $or: [{ title: { $regex: query, $options: 'i' } }, { description: { $regex: query, $options: 'i' } }] }));
 }

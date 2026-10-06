@@ -51,6 +51,8 @@ const courseSchema = new mongoose.Schema(
             required : false
         },
 
+        archivedAt: Date,
+
         isAvailable : {
             type : Boolean,
             required : true,
