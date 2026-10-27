@@ -78,7 +78,7 @@ export async function sendOTP(req, res) {
   const otp = String(randomInt(100000, 1000000));
   await Otp.findOneAndUpdate({ email }, { $set: { otp: otpHash(otp), expiresAt: new Date(Date.now() + 600000), attempts: 0 } }, { upsert: true });
   const transport = nodemailer.createTransport({ service: 'gmail', auth: { user: process.env.SMTP_USER, pass: process.env.GMAIL_APP_PASSWORD } });
-  try { await transport.sendMail({ from: process.env.SMTP_USER, to: email, subject: 'Scholarly password reset', text: 'Your reset code is ' + otp + '. It expires in 10 minutes.' }); }
+  try { await transport.sendMail({ from: process.env.SMTP_USER, to: email, subject: 'learnbridge password reset', text: 'Your reset code is ' + otp + '. It expires in 10 minutes.' }); }
   catch (error) {
     // Log only SMTP diagnostic fields; never log reset codes, recipients, or credentials.
     console.error('Password reset email delivery failed', {
