@@ -11,7 +11,7 @@ router.post('/validate-otp', rateLimit('reset-check', 10), validateOTPAndUpdateP
 router.post('/logout', logout);
 router.get('/', requireUser, getUser);
 router.get('/all', requireAdmin, getAllUsers);
-router.put('/toggle-block/:email', requireAdmin, updateUserStatus);
-router.delete('/:email', requireAdmin, deleteUser);
+router.put('/block/:id', requireAdmin, updateUserStatus);
+router.delete('/:id', requireAdmin, deleteUser);
 router.put('/:email', requireUser, updateUser);
 export default router;

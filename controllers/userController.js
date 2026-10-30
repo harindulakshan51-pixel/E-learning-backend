@@ -35,16 +35,26 @@ export async function loginUser(req, res) {
 export async function getUser(req, res) { res.json(req.user); }
 export async function getAllUsers(req, res) { res.json(await User.find().select('-password -sessionVersion')); }
 export async function updateUserStatus(req, res) {
-  if (req.user.email === req.params.email) throw fail(400, 'You cannot block your own account');
-  if (typeof req.body.isBlocked !== 'boolean') throw fail(400, 'Invalid account status');
-  await User.updateOne({ email: req.params.email }, { $set: { isBlocked: req.body.isBlocked }, $inc: { sessionVersion: 1 } });
-  res.json({ message: 'User status updated successfully' });
+  const userId = req.params.id;
+  if (!/^[a-f\d]{24}$/i.test(userId)) throw fail(400, 'Invalid user ID');
+  if (String(req.user._id) === userId) throw fail(400, 'You cannot block your own account');
+  const user = await User.findById(userId);
+  if (!user) throw fail(404, 'User not found');
+  user.isBlocked = !user.isBlocked;
+  user.sessionVersion += 1;
+  await user.save();
+  const updatedUser = user.toObject();
+  delete updatedUser.password;
+  delete updatedUser.sessionVersion;
+  res.json(updatedUser);
 }
 export async function deleteUser(req, res) {
-  if (req.user.email === req.params.email) throw fail(400, 'You cannot delete your own admin account');
-  // Preserve enrollment and identity records; disable instead of destructive deletion.
-  await User.updateOne({ email: req.params.email }, { $set: { isBlocked: true }, $inc: { sessionVersion: 1 } });
-  res.json({ message: 'Account disabled; historical records preserved' });
+  const userId = req.params.id;
+  if (!/^[a-f\d]{24}$/i.test(userId)) throw fail(400, 'Invalid user ID');
+  if (String(req.user._id) === userId) throw fail(400, 'You cannot delete your own admin account');
+  const deletedUser = await User.findByIdAndDelete(userId);
+  if (!deletedUser) throw fail(404, 'User not found');
+  res.json({ message: 'User deleted successfully' });
 }
 export async function updateUser(req, res) {
   if (!req.user.isAdmin && req.user.email !== req.params.email) throw fail(403, 'Forbidden');
